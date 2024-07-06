@@ -1,5 +1,5 @@
 [package]
-name = "rust-seed"
+name = "probot-rs"
 # don't change this, it's updated before an actual build by update-version.sh
 version = "0.0.0-development"
 edition = "2021"
@@ -9,7 +9,7 @@ description = "Rust seed application"
 license-file = "LICENSE"
 categories = ["starter", "seed"]
 keywords = ["integrity", "seed", "starter", "docker", "release"]
-repository = "https://github.com/kristof-mattei/rust-seed"
+repository = "https://github.com/kristof-mattei/probot-rs"
 
 [lints.clippy]
 # don't stop from compiling / running
@@ -33,6 +33,7 @@ coverage = []
 
 [dependencies]
 color-eyre = "0.6.3"
+tokio = { version = "1.38.0", features = ["macros", "rt", "rt-multi-thread", "time"] }
 # reqwest = { version = "0.11.5", features = ["json"] }
 # serde_json = "1.0.68"
 # serde = { version = "1.0.130", features = ["derive"] }

@@ -1,69 +1,73 @@
-// use std::path::PathBuf;
-
-// use env_logger::Env;
-// use futures::{stream::FuturesUnordered, StreamExt};
-// use log::info;
-
-// use structopt::StructOpt;
-
-// #[derive(Debug, StructOpt)]
-// #[structopt(
-//     // name, // from Cargo.toml,
-//     about, // needed otherwise it doesn't show description from Cargo.toml,
-//     author // needed otherwise it doesn't show author from Cargo.toml
-// )]
-// struct Opt {
-//     #[structopt(
-//         // verbatim_doc_comment,
-//         help = "Some help",
-//         parse(from_os_str)
-//     )]
-//     some_value: PathBuf,
-// }
-
-fn foo() -> &'static str {
-    "Foo"
-}
-
-fn bar() -> &'static str {
-    "Bar"
-}
-
-fn quz() -> &'static str {
-    "Quz"
-}
-
+use std::env;
+use std::sync::Arc;
+use std::time::Duration;
 fn main() -> Result<(), color_eyre::Report> {
-    color_eyre::install()?;
+    // initialize the runtime
+    let rt = tokio::runtime::Runtime::new().unwrap();
 
-    println!("{}", foo());
-    println!("{}", bar());
-    println!("{}", quz());
+    // start service
+    let result: Result<(), color_eyre::Report> = rt.block_on(start_tasks());
 
-    todo!("TODO");
+    result
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{bar, foo, quz};
+async fn start_tasks() -> Result<(), color_eyre::Report> {
+    let token = CancellationToken::new();
 
-    #[test]
-    fn assert_foo() {
-        assert_eq!(foo(), "Foo");
+    let mut tasks = tokio::task::JoinSet::new();
+
+    {
+        let token = token.clone();
+
+        tasks.spawn(async move {
+            match server_forever(bind_to, router, token.clone()).await {
+                Err(err) => {
+                    event!(Level::ERROR, ?err, "Server died");
+                },
+                Ok(()) => {
+                    event!(Level::INFO, "Server shut down");
+                },
+            }
+        });
     }
 
-    #[test]
-    fn assert_bar() {
-        assert_eq!(bar(), "Bar");
+    // now we wait forever for either
+    // * SIGTERM
+    // * ctrl + c (SIGINT)
+    // * a message on the shutdown channel, sent either by the server task or
+    // another task when they complete (which means they failed)
+    tokio::select! {
+        _ = signal_handlers::wait_for_sigint() => {
+            // we completed because ...
+            event!(Level::WARN, message = "CTRL+C detected, stopping all tasks");
+        },
+        _ = tasks.join_next() => {},
+        _ = signal_handlers::wait_for_sigterm() => {
+            // we completed because ...
+            event!(Level::WARN, message = "Sigterm detected, stopping all tasks");
+        },
+        () = token.cancelled() => {
+            event!(Level::WARN, "Underlying task stopped, stopping all others tasks");
+        },
+    };
+
+    // backup, in case we forgot a dropguard somewhere
+    token.cancel();
+
+    // wait for the task that holds the server to exit gracefully
+    // it listens to shutdown_send
+    if timeout(Duration::from_millis(10000), tasks.shutdown())
+        .await
+        .is_err()
+    {
+        event!(Level::ERROR, "Tasks didn't stop within allotted time!");
     }
 
-    #[test]
-    fn assert_quz() {
-        assert_eq!(quz(), "Quz");
+    {
+        (statistics.read().await).log_totals::<()>(&[]);
     }
 
-    #[test]
-    fn assert_combined() {
-        assert_eq!(format!("{}-{}-{}", foo(), bar(), quz()), "Foo-Bar-Quz");
-    }
+    event!(Level::INFO, "Goodbye");
+
+    Ok(())
 }
